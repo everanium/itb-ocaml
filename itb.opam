@@ -1,0 +1,28 @@
+opam-version: "2.0"
+version: "0.3.0"
+synopsis: "OCaml binding for the ITB Triple Pipeline (libitb runtime FFI)"
+description: """
+Thin OCaml proxy over the libitb shared library's ITB_Triple_* surface
+(cmd/cshared). Runtime FFI via ocaml-ctypes and libffi -- no
+compile-time link; the .so / .dylib / .dll is resolved at load time.
+Every hash-name / MAC-name / cipher-name / profile-name is an opaque
+string passed through to Go for validation; the binding carries no ITB
+construction logic of its own.
+"""
+maintainer: "everanium"
+authors: "everanium"
+license: "MIT"
+homepage: "https://github.com/everanium/itb"
+bug-reports: "https://github.com/everanium/itb/issues"
+dev-repo: "git+https://github.com/everanium/itb.git"
+depends: [
+  "ocaml" {>= "4.14"}
+  "dune" {>= "3.0"}
+  "ctypes" {>= "0.20"}
+  "ctypes-foreign" {>= "0.20"}
+  "alcotest" {with-test & >= "1.0"}
+]
+build: [
+  ["dune" "build" "-p" name "-j" jobs]
+  ["dune" "runtest" "-p" name "-j" jobs] {with-test}
+]

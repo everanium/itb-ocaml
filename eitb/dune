@@ -1,0 +1,3 @@
+(executable
+ (name itb_eitb)
+ (libraries itb))

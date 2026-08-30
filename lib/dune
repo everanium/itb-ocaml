@@ -1,0 +1,4 @@
+(library
+ (name itb)
+ (public_name itb)
+ (libraries ctypes ctypes-foreign))
