@@ -250,6 +250,10 @@ let test_into_cap_guard_raises_invalid_argument () =
   (match Itb.write_sub enc buf 1 (Bytes.length buf) with
   | exception Invalid_argument _ -> ()
   | _ -> Alcotest.fail "escaping range accepted by write_sub");
+  (* The stream is still usable after the two argument-guard rejections;
+     feed real bytes so the cleanup drain does not hit Go's uniform
+     empty-input policy (ErrEmptyInput -> ITB_error 4). *)
+  Itb.write_sub enc buf 0 (Bytes.length buf);
   ignore (Itb.drain_all enc);
   Itb.close pipe
 
