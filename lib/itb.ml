@@ -17,7 +17,7 @@ type 'a stream = 'a Stream.t
 type stream_encryptor = enc stream
 type stream_decryptor = dec stream
 
-let binding_version = "0.3.4"
+let binding_version = "0.3.5"
 
 (* Shipped Triple profile names. The authoritative registry lives in
    Go; this roster mirrors it for discovery from tests and the

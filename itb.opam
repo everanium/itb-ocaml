@@ -1,5 +1,5 @@
 opam-version: "2.0"
-version: "0.3.4"
+version: "0.3.5"
 synopsis: "OCaml binding for the ITB Triple Pipeline (libitb runtime FFI)"
 description: """
 Thin OCaml proxy over the libitb shared library's ITB_Triple_* surface
