@@ -11,7 +11,7 @@
     Example:
     {[
       let sender = Itb.create "singlemsg-triple-mac-v1" () in
-      let receiver = Itb.open_ "singlemsg-triple-mac-v1" (Itb.blob sender) in
+      let receiver = Itb.load (Itb.save sender) in
       let wire = Itb.encrypt_message sender (Bytes.of_string "hello") in
       assert (Itb.decrypt_message receiver wire = Bytes.of_string "hello")
     ]} *)
@@ -28,9 +28,9 @@ exception ITB_error of int * string
 (** Short human-readable label for a libitb status code. *)
 val status_label : int -> string
 
-(** A Triple Pipeline session plus its exported blob bytes. The
-    Go-side handle is released by a GC finaliser; [close] zeroes the
-    key material deterministically without waiting for the GC. *)
+(** A Triple Pipeline session. The Go-side handle is released by a GC
+    finaliser; [close] zeroes the key material deterministically
+    without waiting for the GC. *)
 type pipeline
 
 (** Phantom direction tags for stream sessions. *)
@@ -49,22 +49,44 @@ type 'a stream
 type stream_encryptor = enc stream
 type stream_decryptor = dec stream
 
-(** [create profile ?blob ?opts ()] constructs a pipeline against the
-    named profile: a fresh session when [blob] is absent, or a
-    session reconstructed from a received blob when present. [opts]
-    is an association list rendered as the URL-query opts string the
-    Go side validates (e.g. [("innerHash", "areion512")];
-    unknown keys are rejected by libitb). *)
-val create : string -> ?blob:bytes -> ?opts:(string * string) list -> unit -> pipeline
+(** [create profile ?opts ()] constructs a fresh pipeline against the
+    named profile; the session bundle is available through [save].
+    [opts] is an association list rendered as the URL-query opts
+    string the Go side validates (e.g. [("innerHash", "areion512")];
+    unknown keys are rejected by libitb). An unregistered name raises
+    [ITB_error] with the UNKNOWN_PROFILE status (13). *)
+val create : string -> ?opts:(string * string) list -> unit -> pipeline
 
-(** [open_ profile blob] reconstructs a pipeline from a blob produced
-    by [create] (via [blob]) or refreshed by [rekey], with default
-    opts. Equivalent to [create profile ~blob ()]. *)
-val open_ : string -> bytes -> pipeline
+(** [load ?perm ?wrap blob] reconstructs a pipeline from a blob
+    produced by [save] or [rekey]. Omit both masters to use the
+    blob-embedded pair; supply both to override them (the pair is
+    validated by libitb). The profile shape travels inside the blob —
+    no profile name, no opts. A blob whose record names a primitive
+    absent from the local build raises [ITB_error] with the
+    RECIPE_PRIMITIVE_UNKNOWN status (12); a record failing the profile
+    field rules the BLOB_MALFORMED_RECIPE status (11). *)
+val load : ?perm:bytes -> ?wrap:bytes -> bytes -> pipeline
 
-(** The exported session-bundle bytes for the receiver side (a
-    fresh copy on every call). *)
-val blob : pipeline -> bytes
+(** [load_f ?perm ?wrap path] is [load] for a blob stored at [path];
+    the file is read inside libitb (a missing or unreadable file
+    raises [ITB_error] with the BAD_INPUT status (4)). *)
+val load_f : ?perm:bytes -> ?wrap:bytes -> string -> pipeline
+
+(** The current session-bundle bytes for the receiver side (the
+    [create] blob, or the bytes of the latest [rekey]); a fresh copy
+    on every call. A closed pipeline raises [ITB_error] with the
+    TRIPLE_CLOSED status (25). *)
+val save : pipeline -> bytes
+
+(** [save_f p path] writes the current blob to [path] inside libitb
+    (mode 0600; the containing directory must exist). *)
+val save_f : pipeline -> string -> unit
+
+(** [max_workers p n] sets the worker cap for every subsequent cipher
+    call. [n] is clamped by libitb ([<= 0] selects auto, [> 256]
+    becomes 256); only the handle state is reported. The cap is
+    per-machine and never travels in the blob. *)
+val max_workers : pipeline -> int -> unit
 
 (** Single Message encrypt: one call, one self-contained wire. *)
 val encrypt_message : pipeline -> bytes -> bytes
@@ -73,11 +95,11 @@ val encrypt_message : pipeline -> bytes -> bytes
 val decrypt_message : pipeline -> bytes -> bytes
 
 (** [rekey ?perm ?wrap p] rotates the parallax + wrapper masters and
-    refreshes [blob p]. A master may be omitted only when the
-    corresponding layer is off for the profile. Must not run
-    concurrently with cipher calls or open stream sessions on the
-    same pipeline. *)
-val rekey : ?perm:bytes -> ?wrap:bytes -> pipeline -> unit
+    returns the fresh blob (also available through [save p]). A
+    master may be omitted only when the corresponding layer is off
+    for the profile. Must not run concurrently with cipher calls or
+    open stream sessions on the same pipeline. *)
+val rekey : ?perm:bytes -> ?wrap:bytes -> pipeline -> bytes
 
 (** Zeroes the pipeline's key material and marks it closed.
     Idempotent; subsequent cipher calls raise [ITB_error] with the
@@ -110,12 +132,8 @@ val read : ?max_bytes:int -> 'a stream -> bytes * bool
     byte, and releases the session. *)
 val drain_all : 'a stream -> bytes
 
-(** The shipped hash primitive roster in registry order. *)
-val hashes : unit -> string list
-
-(** The shipped Triple profile names. The authoritative registry
-    lives in Go; this roster mirrors it for discovery from tests and
-    the shell. *)
+(** The sorted list of every registered profile name — the shipped
+    catalogue plus prior [register] calls. *)
 val profiles : unit -> string list
 
 (** The libitb library version string. *)
@@ -130,15 +148,31 @@ val set_memory_limit : int -> unit
 (** Sets the Go GC trigger percentage. *)
 val set_gc_percent : int -> unit
 
-(** [register_profile ~name ~body] installs a user-defined Triple
-    profile so subsequent [create] / [open_] calls resolve [name].
-    [body] is the URL-query-encoded register-profile opts string
-    validated by the Go side ([mode], [width], [innerHash] /
-    [innerHashes], [keyBits], [macName], [outerCipher],
-    [parallaxPalette], [parallaxSegmentSize], [chunkSize],
-    [parallaxOn], [wrapperOn]). A duplicate name raises [ITB_error]
-    with the PROFILE_EXISTS status (26). *)
-val register_profile : name:string -> body:string -> unit
+(** A profile record is the JSON object libitb accepts in [register],
+    returns from [lookup] / [inspect], and embeds in every blob: keys
+    [name] / [mode] / [width] / [hash] / [hashes] / [keybits] / [mac]
+    / [tagstub] / [chunk] / [wrapper] / [outer] / [parallax] /
+    [palette] / [segment]. Optional keys are omitted when empty /
+    zero. The binding treats the record as an opaque string; every
+    field rule is enforced by libitb.
+
+    [inspect blob] decodes the profile record embedded in [blob]
+    without constructing a pipeline. No registry read, no primitive
+    probe. *)
+val inspect : bytes -> string
+
+(** [register ~name ~profile] installs a user-defined Triple profile
+    under [name] from a profile JSON record (a non-empty ["name"] key
+    inside the record must equal [name]) so subsequent [create] calls
+    resolve it. A duplicate name raises [ITB_error] with the
+    PROFILE_EXISTS status (26). *)
+val register : name:string -> profile:string -> unit
+
+(** [lookup name] returns the profile registered under [name] — a
+    shipped catalogue entry or a prior [register] — as its JSON
+    record. An unregistered name raises [ITB_error] with the
+    UNKNOWN_PROFILE status (13). *)
+val lookup : string -> string
 
 (** Whole-stream encrypt in a single call: the complete plaintext in,
     the complete stream wire out. The wire is byte-identical to what

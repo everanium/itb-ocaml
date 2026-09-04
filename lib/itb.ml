@@ -17,32 +17,19 @@ type 'a stream = 'a Stream.t
 type stream_encryptor = enc stream
 type stream_decryptor = dec stream
 
-let binding_version = "0.3.5"
+let binding_version = "0.4.1"
 
-(* Shipped Triple profile names. The authoritative registry lives in
-   Go; this roster mirrors it for discovery from tests and the
-   shell. *)
-let shipped_profiles =
-  [
-    "streaming-aead-triple-mac-v1";
-    "streaming-noaead-triple-v1";
-    "singlemsg-triple-mac-v1";
-    "singlemsg-triple-nomac-v1";
-    "blob-triple-mac-v1";
-    "streaming-aead-triple-mac-mixed-v1";
-    "streaming-noaead-triple-mixed-v1";
-    "singlemsg-triple-mac-mixed-v1";
-    "singlemsg-triple-nomac-mixed-v1";
-  ]
+let create profile ?(opts = []) () = Pipeline.init profile (Pipeline.render_opts opts)
 
-let create profile ?blob ?(opts = []) () =
-  let opts_str = Pipeline.render_opts opts in
-  match blob with
-  | None -> Pipeline.init profile opts_str
-  | Some b -> Pipeline.open_ profile b opts_str
+let load ?(perm = Bytes.create 0) ?(wrap = Bytes.create 0) blob =
+  Pipeline.load blob perm wrap
 
-let open_ profile blob = Pipeline.open_ profile blob ""
-let blob (p : pipeline) = Bytes.copy p.Pipeline.blob
+let load_f ?(perm = Bytes.create 0) ?(wrap = Bytes.create 0) path =
+  Pipeline.load_f path perm wrap
+
+let save = Pipeline.save
+let save_f = Pipeline.save_f
+let max_workers = Pipeline.max_workers
 let encrypt_message = Pipeline.encrypt_message
 let decrypt_message = Pipeline.decrypt_message
 
@@ -57,16 +44,7 @@ let end_ = Stream.end_
 let read = Stream.read
 let drain_all = Stream.drain_all
 
-let hashes () =
-  let s = Ffi_bridge.syms () in
-  List.init (s.hash_count ()) (fun i ->
-      let cap = 128 in
-      let buf = Bytes.create cap in
-      let need = Ffi_bridge.new_size_out () in
-      Ffi_bridge.check (s.hash_name i (Ffi_bridge.bs buf) (Ffi_bridge.sz cap) need);
-      Bytes.sub_string buf 0 (max (Ffi_bridge.sz_int !@need - 1) 0))
-
-let profiles () = shipped_profiles
+let profiles = Pipeline.profiles
 
 let version () =
   let s = Ffi_bridge.syms () in
@@ -94,7 +72,9 @@ let set_gc_percent pct =
   let s = Ffi_bridge.syms () in
   ignore (s.set_gc_percent pct)
 
-let register_profile ~name ~body = Pipeline.register_profile name body
+let inspect = Pipeline.inspect
+let register ~name ~profile = Pipeline.register name profile
+let lookup = Pipeline.lookup
 let encrypt_stream_one_shot = Pipeline.encrypt_stream_one_shot
 let decrypt_stream_one_shot = Pipeline.decrypt_stream_one_shot
 

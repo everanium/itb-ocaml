@@ -3,17 +3,17 @@
    Subcommands:
 
      eitb version                                   library + binding versions
-     eitb hashes                                    shipped hash primitive roster
-     eitb profiles                                  built-in Triple profile names
+     eitb profiles                                  registered profile catalogue
      eitb encrypt <profile> <in-file> <out-file>    Single Message encrypt
      eitb decrypt <profile> <blob-hex> <in-file> <out-file>
 
    [encrypt] prints the session blob to stderr as hex; feed that hex
-   back to [decrypt] on the receiving side. *)
+   back to [decrypt] on the receiving side. [profiles] lists the
+   registered profile catalogue one name per line; the profiles that
+   carry a cipher surface are the ones [encrypt] / [decrypt] accept. *)
 
 let usage =
   "usage: eitb version\n\
-  \       eitb hashes\n\
   \       eitb profiles\n\
   \       eitb encrypt <profile> <in-file> <out-file>\n\
   \       eitb decrypt <profile> <blob-hex> <in-file> <out-file>"
@@ -56,9 +56,6 @@ let cmd_version () =
   Printf.printf "libitb %s\n" (Itb.version ());
   Printf.printf "itb-ocaml %s\n" Itb.binding_version
 
-let cmd_hashes () =
-  List.iteri (fun i name -> Printf.printf "%2d  %s\n" i name) (Itb.hashes ())
-
 let cmd_profiles () = List.iter print_endline (Itb.profiles ())
 
 (* Profiles whose canonical name begins with "streaming-" route
@@ -89,7 +86,7 @@ let cmd_encrypt profile infile outfile =
   in
   ensure_parent_dir outfile;
   write_file outfile wire;
-  prerr_endline (to_hex (Itb.blob pipe));
+  prerr_endline (to_hex (Itb.save pipe));
   Itb.close pipe;
   Printf.printf "encrypted %s -> %s (%d -> %d bytes)\n" infile outfile
     (Bytes.length plain) (Bytes.length wire)
@@ -97,7 +94,9 @@ let cmd_encrypt profile infile outfile =
 let cmd_decrypt profile blob_hex infile outfile =
   let blob = of_hex blob_hex in
   let wire = read_file infile in
-  let pipe = Itb.create profile ~blob () in
+  (* The profile shape travels inside the blob; the profile argument
+     only selects the Single Message or streaming cipher pair. *)
+  let pipe = Itb.load blob in
   let plain =
     if is_streaming_profile profile then Itb.decrypt_stream_one_shot pipe wire
     else Itb.decrypt_message pipe wire
@@ -116,7 +115,6 @@ let () =
     Itb.set_gc_percent 20;
     match List.tl argv with
     | [ "version" ] -> cmd_version ()
-    | [ "hashes" ] -> cmd_hashes ()
     | [ "profiles" ] -> cmd_profiles ()
     | [ "encrypt"; profile; infile; outfile ] -> cmd_encrypt profile infile outfile
     | [ "decrypt"; profile; blob_hex; infile; outfile ] ->

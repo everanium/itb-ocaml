@@ -44,6 +44,9 @@ let status_label = function
   | 8 -> "seed width mismatch"
   | 9 -> "unknown MAC name or invalid MAC handle"
   | 10 -> "MAC verification failed"
+  | 11 -> "blob recipe malformed"
+  | 12 -> "blob recipe names an unknown primitive"
+  | 13 -> "unknown profile name"
   | 19 -> "blob mode mismatch"
   | 20 -> "malformed state blob"
   | 21 -> "blob version too new"
@@ -108,18 +111,23 @@ let resolve_library_path () =
 type syms = {
   version : Bytes.t ocaml -> Unsigned.size_t -> Unsigned.size_t ptr -> int;
   last_error : Bytes.t ocaml -> Unsigned.size_t -> Unsigned.size_t ptr -> int;
-  hash_count : unit -> int;
-  hash_name : int -> Bytes.t ocaml -> Unsigned.size_t -> Unsigned.size_t ptr -> int;
-  hash_width : int -> int;
   set_memory_limit : int64 -> int64;
   set_gc_percent : int -> int;
   triple_init :
     string -> string -> Bytes.t ocaml -> Unsigned.size_t -> Unsigned.size_t ptr ->
     Unsigned.size_t ptr -> int;
-  triple_open :
-    string -> Bytes.t ocaml -> Unsigned.size_t -> string -> Bytes.t ocaml ->
-    Unsigned.size_t -> Bytes.t ocaml -> Unsigned.size_t -> Unsigned.size_t ->
+  triple_load :
+    Bytes.t ocaml -> Unsigned.size_t -> Bytes.t ocaml -> Unsigned.size_t ->
+    Bytes.t ocaml -> Unsigned.size_t -> Unsigned.size_t -> Unsigned.size_t ptr -> int;
+  triple_load_f :
+    string -> Bytes.t ocaml -> Unsigned.size_t -> Bytes.t ocaml -> Unsigned.size_t ->
+    Unsigned.size_t -> Unsigned.size_t ptr -> int;
+  triple_save : Unsigned.size_t -> Bytes.t ocaml -> Unsigned.size_t -> Unsigned.size_t ptr -> int;
+  triple_save_f : Unsigned.size_t -> string -> int;
+  triple_inspect :
+    Bytes.t ocaml -> Unsigned.size_t -> Bytes.t ocaml -> Unsigned.size_t ->
     Unsigned.size_t ptr -> int;
+  triple_max_workers : Unsigned.size_t -> int -> int;
   triple_rekey :
     Unsigned.size_t -> Bytes.t ocaml -> Unsigned.size_t -> Bytes.t ocaml ->
     Unsigned.size_t -> Bytes.t ocaml -> Unsigned.size_t -> Unsigned.size_t ptr -> int;
@@ -155,20 +163,27 @@ let load () =
   {
     version = f "ITB_Version" buf_out;
     last_error = f "ITB_LastError" buf_out;
-    hash_count = f "ITB_HashCount" (void @-> returning int);
-    hash_name =
-      f "ITB_HashName" (int @-> ocaml_bytes @-> size_t @-> ptr size_t @-> returning int);
-    hash_width = f "ITB_HashWidth" (int @-> returning int);
     set_memory_limit = f "ITB_SetMemoryLimit" (int64_t @-> returning int64_t);
     set_gc_percent = f "ITB_SetGCPercent" (int @-> returning int);
     triple_init =
       f "ITB_Triple_Init"
         (string @-> string @-> ocaml_bytes @-> size_t @-> ptr size_t @-> ptr size_t
         @-> returning int);
-    triple_open =
-      f "ITB_Triple_Open"
-        (string @-> ocaml_bytes @-> size_t @-> string @-> ocaml_bytes @-> size_t
-        @-> ocaml_bytes @-> size_t @-> size_t @-> ptr size_t @-> returning int);
+    triple_load =
+      f "ITB_Triple_Load"
+        (ocaml_bytes @-> size_t @-> ocaml_bytes @-> size_t @-> ocaml_bytes @-> size_t
+        @-> size_t @-> ptr size_t @-> returning int);
+    triple_load_f =
+      f "ITB_Triple_LoadF"
+        (string @-> ocaml_bytes @-> size_t @-> ocaml_bytes @-> size_t @-> size_t
+        @-> ptr size_t @-> returning int);
+    triple_save =
+      f "ITB_Triple_Save" (size_t @-> ocaml_bytes @-> size_t @-> ptr size_t @-> returning int);
+    triple_save_f = f "ITB_Triple_SaveF" (size_t @-> string @-> returning int);
+    triple_inspect =
+      f "ITB_Triple_Inspect"
+        (ocaml_bytes @-> size_t @-> ocaml_bytes @-> size_t @-> ptr size_t @-> returning int);
+    triple_max_workers = f "ITB_Triple_MaxWorkers" (size_t @-> int @-> returning int);
     triple_rekey =
       f "ITB_Triple_Rekey"
         (size_t @-> ocaml_bytes @-> size_t @-> ocaml_bytes @-> size_t @-> ocaml_bytes
@@ -271,7 +286,9 @@ let out_cap payload = max 65536 ((payload + (payload / 4)) + 65536)
    already-loaded library returns the same process handle, so the
    second resolve is cheap and never maps the library twice. *)
 type ext_syms = {
-  triple_register_profile : string -> string -> int;
+  triple_register : string -> string -> int;
+  triple_lookup : string -> Bytes.t ocaml -> Unsigned.size_t -> Unsigned.size_t ptr -> int;
+  triple_profiles : Bytes.t ocaml -> Unsigned.size_t -> Unsigned.size_t ptr -> int;
   triple_encrypt_stream :
     Unsigned.size_t -> Bytes.t ocaml -> Unsigned.size_t -> Bytes.t ocaml ->
     Unsigned.size_t -> Unsigned.size_t ptr -> int;
@@ -295,8 +312,11 @@ let load_ext () =
     @-> returning int
   in
   {
-    triple_register_profile =
-      f "ITB_Triple_RegisterProfile" (string @-> string @-> returning int);
+    triple_register = f "ITB_Triple_Register" (string @-> string @-> returning int);
+    triple_lookup =
+      f "ITB_Triple_Lookup" (string @-> ocaml_bytes @-> size_t @-> ptr size_t @-> returning int);
+    triple_profiles =
+      f "ITB_Triple_Profiles" (ocaml_bytes @-> size_t @-> ptr size_t @-> returning int);
     triple_encrypt_stream = f "ITB_Triple_EncryptStream" cipher;
     triple_decrypt_stream = f "ITB_Triple_DecryptStream" cipher;
   }
