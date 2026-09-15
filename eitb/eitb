@@ -1,0 +1,20 @@
+#!/usr/bin/env bash
+#
+# eitb -- launcher for the OCaml binding's CLI demonstrator. Builds
+# the dune executable on demand, then runs the built binary directly
+# so relative file arguments resolve against the caller's working
+# directory.
+
+set -eu
+set -o pipefail
+
+DIR="$(cd "$(dirname "$0")" && pwd)"
+ROOT="$DIR/.."
+
+if command -v opam >/dev/null 2>&1; then
+    eval "$(opam env 2>/dev/null)" || true
+fi
+
+(cd "$ROOT" && dune build --no-print-directory eitb/itb_eitb.exe) >&2
+
+exec "$ROOT/_build/default/eitb/itb_eitb.exe" "$@"
