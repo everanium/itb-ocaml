@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 #
-# eitb -- launcher for the OCaml binding's CLI demonstrator. Builds
-# the dune executable on demand, then runs the built binary directly
-# so relative file arguments resolve against the caller's working
+# Launcher for the OCaml binding's CLI demonstrator. Builds the dune
+# executable on demand, then runs the built binary directly so
+# relative file arguments resolve against the caller's working
 # directory.
 
 set -eu

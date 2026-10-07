@@ -1,10 +1,10 @@
-(* eitb -- command-line demonstrator for the ITB OCaml binding.
+(* Command-line demonstrator for the ITB OCaml binding.
 
    Subcommands:
 
-     eitb version                                   library + binding versions
-     eitb profiles                                  registered profile catalogue
-     eitb encrypt <profile> <in-file> <out-file>    Single Message encrypt
+     eitb version
+     eitb profiles
+     eitb encrypt <profile> <in-file> <out-file>
      eitb decrypt <profile> <blob-hex> <in-file> <out-file>
 
    [encrypt] prints the session blob to stderr as hex; feed that hex
@@ -125,8 +125,7 @@ let () =
   in
   try run () with
   | Itb3.ITB_error (st, msg) ->
-      Printf.eprintf "eitb: status=%d (%s)%s\n" st (Itb3.status_label st)
-        (if msg = "" then "" else ": " ^ msg);
+      Printf.eprintf "eitb: status=%d: %s\n" st msg;
       exit 1
   | Sys_error msg ->
       Printf.eprintf "eitb: %s\n" msg;

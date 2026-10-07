@@ -135,7 +135,7 @@ let bench_stream () =
           in
           final ());
       (* Pre-encrypt one wire outside the decrypt timing loop. *)
-      let parts = Buffer.create (size + 65536) in
+      let parts = Buffer.create (size + 131072) in
       let enc = Itb3.encrypt_stream pipe in
       let off = ref 0 in
       while !off < size do
@@ -179,7 +179,7 @@ let bench_stream () =
     sizes;
   Itb3.close pipe
 
-(* Whole-buffer stream: one FFI round trip through
+(* One-shot stream: one FFI round trip through
    Itb3.encrypt_stream_one_shot / Itb3.decrypt_stream_one_shot per
    iteration. *)
 let bench_stream_one_shot () =
@@ -197,8 +197,8 @@ let bench_stream_one_shot () =
   Itb3.close pipe
 
 let () =
-  (* Bench-scale allocation churn leaks Go scratch heap unboundedly
-     without a soft memory cap + aggressive GC. *)
+  (* Bench-scale allocation churn grows the Go scratch heap
+     unboundedly without a soft memory cap + aggressive GC. *)
   Itb3.set_memory_limit (4 * 1024 * 1024 * 1024);
   Itb3.set_gc_percent 100;
   Printf.printf "%-17s %-8s %s\n%!" "bench" "size" "mb_per_sec";

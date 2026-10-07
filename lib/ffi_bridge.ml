@@ -29,36 +29,6 @@ exception ITB_error of int * string
 let status_ok = 0
 let status_buffer_too_small = 5
 
-(* Short human-readable label for a libitb3 status code, mirrored from
-   cmd/cshared/internal/capi/errors.go. Numeric values are stable
-   across releases. *)
-let status_label = function
-  | 0 -> "ok"
-  | 1 -> "unknown hash name"
-  | 2 -> "invalid key bits"
-  | 3 -> "invalid handle"
-  | 4 -> "invalid input"
-  | 5 -> "output buffer too small"
-  | 6 -> "encrypt failed"
-  | 7 -> "decrypt failed"
-  | 8 -> "seed width mismatch"
-  | 9 -> "unknown MAC name or invalid MAC handle"
-  | 10 -> "MAC verification failed"
-  | 11 -> "blob recipe malformed"
-  | 12 -> "blob recipe names an unknown primitive"
-  | 13 -> "unknown profile name"
-  | 19 -> "blob mode mismatch"
-  | 20 -> "malformed state blob"
-  | 21 -> "blob version too new"
-  | 22 -> "too many blob export opts"
-  | 23 -> "stream truncated before terminator"
-  | 24 -> "stream chunk after terminator"
-  | 25 -> "Triple Pipeline is closed"
-  | 26 -> "profile name already registered"
-  | 99 -> "internal error"
-  | -1 -> "binding-side failure"
-  | _ -> "unknown status"
-
 (* ---------------------------------------------------------------- *)
 (* Library resolution                                               *)
 (* ---------------------------------------------------------------- *)
@@ -110,6 +80,7 @@ let resolve_library_path () =
    held for the duration of each call, so the buffers stay pinned). *)
 type syms = {
   version : Bytes.t ocaml -> Unsigned.size_t -> Unsigned.size_t ptr -> int;
+  drbg_auto_tier : Bytes.t ocaml -> Unsigned.size_t -> Unsigned.size_t ptr -> int;
   last_error : Bytes.t ocaml -> Unsigned.size_t -> Unsigned.size_t ptr -> int;
   set_memory_limit : int64 -> int64;
   set_gc_percent : int -> int;
@@ -162,6 +133,7 @@ let load () =
   let buf_out = ocaml_bytes @-> size_t @-> ptr size_t @-> returning int in
   {
     version = f "ITB_Version" buf_out;
+    drbg_auto_tier = f "ITB_DRBGAutoTier" buf_out;
     last_error = f "ITB_LastError" buf_out;
     set_memory_limit = f "ITB_SetMemoryLimit" (int64_t @-> returning int64_t);
     set_gc_percent = f "ITB_SetGCPercent" (int @-> returning int);
@@ -272,10 +244,10 @@ let retry_once cap (call : Bytes.t -> int -> Unsigned.size_t ptr -> int) =
     Bytes.sub buf 0 n)
 
 (* Pre-allocation formula for Message output buffers:
-   [max 65536 (payload * 5/4 + 65536)] -- small plaintexts expand by
+   [max 131072 (payload * 5/4 + 131072)] -- small plaintexts expand by
    a large constant factor, so the retry-once path stays available as
    the safety net. *)
-let out_cap payload = max 65536 ((payload + (payload / 4)) + 65536)
+let out_cap payload = max 131072 ((payload + (payload / 4)) + 131072)
 
 (* ---------------------------------------------------------------- *)
 (* Extended symbol table                                            *)
@@ -326,3 +298,47 @@ let load_ext () =
    force. *)
 let ext_syms_lazy = lazy (load_ext ())
 let ext_syms () = Lazy.force ext_syms_lazy
+
+(* ---------------------------------------------------------------- *)
+(* Runtime observation symbol table                                 *)
+(* ---------------------------------------------------------------- *)
+
+(* The runtime-family entries added after the first two records, kept
+   in a third of their own for the same reason the second exists: the
+   shapes already published stay untouched. The pool-counter vector is
+   the one output here that is not a byte buffer, so it crosses as a
+   [ptr int64_t] over C-allocated storage rather than as [ocaml_bytes];
+   the element count comes from the library's own length query. *)
+type rt_syms = {
+  set_gomaxprocs : int -> int;
+  write_heap_profile : string -> int;
+  pool_stats_len : unit -> int;
+  pool_stats : int64 ptr -> Unsigned.size_t -> Unsigned.size_t ptr -> int;
+  triple_hash_names : Bytes.t ocaml -> Unsigned.size_t -> Unsigned.size_t ptr -> int;
+}
+
+let load_rt () =
+  let path = resolve_library_path () in
+  let lib =
+    try Dl.dlopen ~filename:path ~flags:[ Dl.RTLD_NOW ]
+    with e ->
+      raise
+        (ITB_error
+           (-1, Printf.sprintf "failed to load libitb3 (%s): %s" path (Printexc.to_string e)))
+  in
+  let f name typ = Foreign.foreign ~from:lib name typ in
+  {
+    set_gomaxprocs = f "ITB_SetGOMAXPROCS" (int @-> returning int);
+    write_heap_profile = f "ITB_WriteHeapProfile" (string @-> returning int);
+    pool_stats_len = f "ITB_PoolStatsLen" (void @-> returning int);
+    pool_stats =
+      f "ITB_PoolStats" (ptr int64_t @-> size_t @-> ptr size_t @-> returning int);
+    triple_hash_names =
+      f "ITB_Triple_HashNames" (ocaml_bytes @-> size_t @-> ptr size_t @-> returning int);
+  }
+
+(* Lazy for the same reason as [syms_lazy]: a resolve failure surfaces
+   at the first runtime-observation call and is re-raised on every
+   later force. *)
+let rt_syms_lazy = lazy (load_rt ())
+let rt_syms () = Lazy.force rt_syms_lazy

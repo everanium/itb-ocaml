@@ -27,6 +27,13 @@ let test_version () =
   | Some _ -> ()
   | None -> Alcotest.failf "version %S has no dot" v)
 
+let test_drbg_auto_tier () =
+  let t = Itb3.drbg_auto_tier () in
+  Alcotest.(check bool)
+    (Printf.sprintf "drbg auto tier %S is a fill cipher" t)
+    true
+    (t = "aes-256-ctr" || t = "chacha20")
+
 let test_profiles_list () =
   let profiles = Itb3.profiles () in
   Alcotest.(check bool) "has singlemsg mac" true
@@ -314,7 +321,7 @@ let test_message_into_round_trip () =
   let wire = Bytes.sub wire_buf 0 n in
   Alcotest.(check bool) "into wire matches allocating wire length" true
     (Bytes.length (Itb3.encrypt_message sender plain) > 0);
-  let back_buf = Bytes.create (Bytes.length plain + 65536) in
+  let back_buf = Bytes.create (Bytes.length plain + 131072) in
   let m = Itb3.decrypt_message_into receiver wire back_buf in
   Alcotest.(check bool)
     (Printf.sprintf "message _into round trip (%d vs %d bytes)"
@@ -382,6 +389,176 @@ let test_read_into_partial_drains () =
   Itb3.close receiver;
   Itb3.close sender
 
+
+let test_runtime_observation_handles () =
+  (* GOMAXPROCS: the setter reports the previous value, and the query
+     form (n <= 0) leaves it where the set put it. *)
+  let previous = Itb3.set_gomaxprocs 2 in
+  Alcotest.(check int) "query reports the value just set" 2 (Itb3.set_gomaxprocs 0);
+  ignore (Itb3.set_gomaxprocs previous);
+  (* The heap limit and the GC percentage are readable through their
+     own query entries; a run has a limit in force once one is set. *)
+  Itb3.set_memory_limit (512 * 1024 * 1024);
+  Alcotest.(check bool) "heap limit readable" true
+    (Itb3.memory_limit () = 536870912L);
+  Alcotest.(check bool) "gc percent readable" true (Itb3.gc_percent () > 0);
+  (* The pool-counter vector is sized from the library's own length
+     query; slot 0 carries the hash-array tier count and the layout
+     runs 1 + 5t + 8 slots. *)
+  let n = Itb3.pool_stats_len () in
+  Alcotest.(check bool) "pool slot count positive" true (n > 0);
+  let stats = Itb3.pool_stats () in
+  Alcotest.(check int) "snapshot fills every slot" n (Array.length stats);
+  let tiers = stats.(0) in
+  Alcotest.(check bool) "at least one tier" true (tiers >= 1);
+  Alcotest.(check int) "slot layout is 1 + 5t + 8" n ((1 + (5 * tiers)) + 8);
+  (* Counters are monotone totals since library load, so a second
+     snapshot never goes backwards. *)
+  let again = Itb3.pool_stats () in
+  Array.iteri
+    (fun i v -> Alcotest.(check bool) "counters monotone" true (again.(i) >= v))
+    stats
+
+let test_heap_profile_written () =
+  let path = Filename.temp_file "itb-heap" ".prof" in
+  Fun.protect
+    ~finally:(fun () -> try Sys.remove path with Sys_error _ -> ())
+    (fun () ->
+      Itb3.write_heap_profile path;
+      let ic = open_in_bin path in
+      Fun.protect
+        ~finally:(fun () -> close_in ic)
+        (fun () ->
+          (* A pprof payload is a gzip-wrapped protobuf, so the first
+             two bytes are the gzip magic. *)
+          Alcotest.(check bool) "profile non-empty" true (in_channel_length ic > 0);
+          Alcotest.(check int) "gzip magic byte 0" 0x1f (input_byte ic);
+          Alcotest.(check int) "gzip magic byte 1" 0x8b (input_byte ic)));
+  (* A path the library cannot open surfaces as a diagnostic rather
+     than a silent success. *)
+  check_status 4 (fun () ->
+      Itb3.write_heap_profile (Filename.concat (Filename.get_temp_dir_name ()) "no-such-dir/heap.prof"))
+
+let test_hash_names_registry () =
+  let names = Itb3.hash_names () in
+  Alcotest.(check bool) "registry non-empty" true (names <> []);
+  Alcotest.(check bool) "has areion512" true (List.mem "areion512" names);
+  Alcotest.(check bool) "has aesitb128" true (List.mem "aesitb128" names);
+  Alcotest.(check bool) "rejects a non-primitive" false
+    (List.mem "definitely-not-a-primitive" names);
+  (* Every enumerated name is accepted by Init as an inner hash, which
+     is what the enumeration is for. *)
+  List.iter
+    (fun name ->
+      let pipe = Itb3.create "singlemsg-triple-nomac-v1" ~opts:[ ("innerHash", name) ] () in
+      let record = Itb3.inspect (Itb3.save pipe) in
+      Alcotest.(check bool)
+        (name ^ " reaches the record")
+        true
+        (let needle = Printf.sprintf "\"hash\":\"%s\"" name in
+         let rec find i =
+           if i + String.length needle > String.length record then false
+           else if String.sub record i (String.length needle) = needle then true
+           else find (i + 1)
+         in
+         find 0);
+      Itb3.close pipe)
+    names
+
+let test_long_diagnostic_survives_the_retry () =
+  (* The diagnostic fetch guesses a buffer and retries on the
+     short-buffer return. A sentence longer than that guess is the only
+     thing that exercises the retry, and the caller's own data is what
+     makes one: the library quotes the offending opts value back in
+     full. *)
+  let long = String.make 700 'z' in
+  match Itb3.create "singlemsg-triple-mac-v1" ~opts:[ ("innerHash", long) ] () with
+  | _ -> Alcotest.fail "expected Init to reject a 700-character primitive name"
+  | exception Itb3.ITB_error (_, msg) ->
+      Alcotest.(check bool)
+        (Printf.sprintf "diagnostic kept its full %d bytes" (String.length msg))
+        true
+        (String.length msg > 512);
+      Alcotest.(check bool) "diagnostic carries the offending value" true
+        (let rec find i =
+           if i + String.length long > String.length msg then false
+           else if String.sub msg i (String.length long) = long then true
+           else find (i + 1)
+         in
+         find 0)
+
+let test_drbg_round_trip () =
+  List.iter
+    (fun name ->
+      let sender = Itb3.create "singlemsg-triple-mac-v1" ~opts:[ ("drbg", name) ] () in
+      let receiver = Itb3.load (Itb3.save sender) in
+      let plain = Bytes.of_string ("drbg " ^ name) in
+      Alcotest.(check bool) (name ^ " round trip") true
+        (Bytes.equal plain
+           (Itb3.decrypt_message receiver (Itb3.encrypt_message sender plain)));
+      let back = Bytes.of_string ("reverse " ^ name) in
+      Alcotest.(check bool) (name ^ " reverse round trip") true
+        (Bytes.equal back
+           (Itb3.decrypt_message sender (Itb3.encrypt_message receiver back)));
+      Itb3.close receiver;
+      Itb3.close sender)
+    [ "csprng"; "aesitb128" ]
+
+let test_drbg_inspect_default_and_unknown () =
+  let sender = Itb3.create "singlemsg-triple-mac-v1" ~opts:[ ("drbg", "csprng") ] () in
+  Alcotest.(check bool) "inspect carries drbg" true
+    (contains (Itb3.inspect (Itb3.save sender)) "\"drbg\":\"csprng\"");
+  Itb3.close sender;
+  (* With no drbg set the record carries no drbg key, and no shipped
+     profile names one. *)
+  let plain = Itb3.create "singlemsg-triple-mac-v1" () in
+  Alcotest.(check bool) "default inspect omits drbg" false
+    (contains (Itb3.inspect (Itb3.save plain)) "\"drbg\":");
+  Itb3.close plain;
+  Alcotest.(check bool) "lookup omits drbg" false
+    (contains (Itb3.lookup "singlemsg-triple-mac-v1") "\"drbg\":");
+  (* Status 12 = RECIPE_PRIMITIVE_UNKNOWN. *)
+  match Itb3.create "singlemsg-triple-mac-v1" ~opts:[ ("drbg", "nope") ] () with
+  | exception Itb3.ITB_error (12, msg) ->
+      Alcotest.(check bool) "diagnostic names the token" true (contains msg "nope")
+  | exception Itb3.ITB_error (st, msg) ->
+      Alcotest.failf "expected status 12, got %d (%s)" st msg
+  | _ -> Alcotest.fail "expected ITB_error with status 12, call succeeded"
+
+(* Removes a "key":value, member with a scalar value from a flat JSON
+   object rendering; the record is left unchanged when the key is
+   absent. *)
+let drop_scalar_key record key =
+  let needle = "\"" ^ key ^ "\":" in
+  let n = String.length record and k = String.length needle in
+  let rec find i =
+    if i + k > n then None
+    else if String.sub record i k = needle then Some i
+    else find (i + 1)
+  in
+  match find 0 with
+  | None -> record
+  | Some i ->
+      let j = match String.index_from_opt record (i + k) ',' with
+        | Some c -> c + 1
+        | None -> n
+      in
+      String.sub record 0 i ^ String.sub record j (n - j)
+
+let test_drbg_register_copy () =
+  let sender = Itb3.create "singlemsg-triple-mac-v1" ~opts:[ ("drbg", "csprng") ] () in
+  (* The inspection-only fields are dropped; drbg is a recipe field and
+     stays in the registered copy. *)
+  let record =
+    List.fold_left drop_scalar_key
+      (Itb3.inspect (Itb3.save sender))
+      [ "name"; "nonce_bits"; "barrier_fill"; "container_mode" ]
+  in
+  Itb3.register ~name:"ocaml-binding-test-drbg-copy" ~profile:record;
+  Alcotest.(check bool) "register copy keeps drbg" true
+    (contains (Itb3.lookup "ocaml-binding-test-drbg-copy") "\"drbg\":\"csprng\"");
+  Itb3.close sender
+
 let () =
   (* Go-runtime pacing caps applied before any cipher work. *)
   Itb3.set_memory_limit (512 * 1024 * 1024);
@@ -392,6 +569,7 @@ let () =
       ( "surface",
         [
           case "version" (fun () -> test_version ());
+          case "drbg auto tier" (fun () -> test_drbg_auto_tier ());
           case "profiles list" (fun () -> test_profiles_list ());
         ] );
       ( "message",
@@ -438,5 +616,20 @@ let () =
               test_into_cap_guard_raises_invalid_argument ());
           case "read_into partial drains" (fun () ->
               test_read_into_partial_drains ());
+        ] );
+      ( "runtime",
+        [
+          case "observation handles" (fun () -> test_runtime_observation_handles ());
+          case "heap profile written" (fun () -> test_heap_profile_written ());
+          case "hash registry enumeration" (fun () -> test_hash_names_registry ());
+          case "long diagnostic survives the retry" (fun () ->
+              test_long_diagnostic_survives_the_retry ());
+        ] );
+      ( "drbg",
+        [
+          case "round trip through a loaded blob" (fun () -> test_drbg_round_trip ());
+          case "inspect, default and unknown name" (fun () ->
+              test_drbg_inspect_default_and_unknown ());
+          case "register copy keeps drbg" (fun () -> test_drbg_register_copy ());
         ] );
     ]

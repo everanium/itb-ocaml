@@ -1,0 +1,10 @@
+# The utility's executable is produced into the project's dune build
+# directory, which the binding's own ignore file already covers. What
+# this file keeps out of the index is anything a toolchain run from
+# inside this directory would drop beside the sources, so the rule
+# survives if the tree is ever consumed outside the repository root.
+*.exe
+*.cmi
+*.cmo
+*.cmx
+*.o

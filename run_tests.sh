@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 #
-# run_tests.sh -- one-step test runner for the OCaml binding. Builds
-# libitb3.so and the dune project via build.sh, points ITB_LIBITB3_PATH
-# at the freshly-built shared library, then runs the alcotest suite.
+# One-step test runner for the OCaml binding. Builds libitb3.so and the
+# dune project via build.sh, points ITB_LIBITB3_PATH at the
+# freshly-built shared library, then runs the alcotest suite.
 # Positional arguments are forwarded to the alcotest binary (e.g. a
 # single group via `./run_tests.sh test message`).
 #
