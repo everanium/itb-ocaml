@@ -15,7 +15,7 @@ type 'a stream = 'a Stream.t
 type stream_encryptor = enc stream
 type stream_decryptor = dec stream
 
-let binding_version = "0.5.1"
+let binding_version = "0.5.5"
 
 let create profile ?(opts = []) () = Pipeline.init profile (Pipeline.render_opts opts)
 
