@@ -250,12 +250,21 @@ let test_inspect_carries_recipe_and_inspection_fields () =
     (contains inspected "\"nonce_bits\":");
   Alcotest.(check bool) "inspect carries barrier_fill" true
     (contains inspected "\"barrier_fill\":");
+  Alcotest.(check bool) "inspect carries container_mode 1 by default" true
+    (contains inspected "\"container_mode\":1");
   Alcotest.(check bool) "lookup carries the name" true
     (contains looked "\"name\":\"singlemsg-triple-mac-v1\"");
   Alcotest.(check bool) "lookup omits nonce_bits" false
     (contains looked "\"nonce_bits\":");
   Alcotest.(check bool) "lookup omits barrier_fill" false
     (contains looked "\"barrier_fill\":");
+  Alcotest.(check bool) "lookup omits container_mode" false
+    (contains looked "\"container_mode\":");
+  let s2 = Itb3.create "singlemsg-triple-mac-v1" ~opts:[ ("mode", "2") ] () in
+  let inspected2 = Itb3.inspect (Itb3.save s2) in
+  Alcotest.(check bool) "mode 2 inspect carries container_mode 2" true
+    (contains inspected2 "\"container_mode\":2");
+  Itb3.close s2;
   (* Status 4 = BAD_INPUT. *)
   check_status 4 (fun () -> Itb3.inspect (Bytes.of_string "not a blob"));
   Itb3.close sender

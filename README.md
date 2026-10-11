@@ -86,7 +86,7 @@ string the Go side validates. The resolved shape travels inside the
 blob, so the receiver needs no options of its own:
 
 ```ocaml
-let opts = [("chunkSize", "65536"); ("withWrapper", "false"); ("maxWorkers", "4")] in
+let opts = [("mode", "2"); ("chunkSize", "65536"); ("withWrapper", "false"); ("maxWorkers", "4")] in
 let sender = Itb.create "singlemsg-triple-mac-v1" ~opts () in
 let receiver = Itb.load (Itb.save sender)
 ```

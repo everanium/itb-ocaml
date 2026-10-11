@@ -592,27 +592,6 @@ let log_pipeline_initialised profile blob =
    OCaml-specific. The binding carries no JSON library and reads
    profile records by targeted string handling, so the edit replaces
    the single digit rather than re-serialising the blob. *)
-let edit_inner_blob_mode blob target_mode =
-  let text = Bytes.to_string blob in
-  let ib_key = "\"ib\":{" and mode_key = "\"mode\":" in
-  match find_sub text ib_key with
-  | None -> false
-  | Some ib -> (
-      let off = ib + String.length ib_key in
-      let tail = String.sub text off (String.length text - off) in
-      match find_sub tail mode_key with
-      | None -> false
-      | Some m ->
-          let at = off + m + String.length mode_key in
-          let digit c = c >= '0' && c <= '9' in
-          if at + 1 >= String.length text
-             || text.[at] < '1' || text.[at] > '2'
-             || digit text.[at + 1]
-          then false
-          else (
-            Bytes.set blob at (Char.chr (Char.code '0' + target_mode));
-            true))
-
 (* Constructs one Pipeline against profile with every flag-carried
    override in the opts string (zero values included -- the shared
    library treats zero as "profile default"), then obtains the Init
@@ -620,18 +599,23 @@ let edit_inner_blob_mode blob target_mode =
    blob back, and the bytes are the ones Init produced. Later blob
    reopens use the retained blob; save is never called again. *)
 let build_pipeline cfg profile =
+  let mode_opt =
+    if cfg.blob_mode <> 1 then [ ("mode", string_of_int cfg.blob_mode) ]
+    else []
+  in
   let base =
-    [
-      ("innerHash", cfg.hash);
-      ("macName", cfg.mac);
-      ("withParallax", string_of_bool cfg.parallax);
-      ("withWrapper", string_of_bool cfg.wrapper);
-      ("keyBits", string_of_int cfg.key_bits);
-      ("nonceBits", string_of_int cfg.nonce_bits);
-      ("barrierFill", string_of_int cfg.barrier_fill);
-      ("drbg", cfg.drbg);
-      ("chunkSize", string_of_int cfg.chunk_size);
-    ]
+    mode_opt
+    @ [
+        ("innerHash", cfg.hash);
+        ("macName", cfg.mac);
+        ("withParallax", string_of_bool cfg.parallax);
+        ("withWrapper", string_of_bool cfg.wrapper);
+        ("keyBits", string_of_int cfg.key_bits);
+        ("nonceBits", string_of_int cfg.nonce_bits);
+        ("barrierFill", string_of_int cfg.barrier_fill);
+        ("drbg", cfg.drbg);
+        ("chunkSize", string_of_int cfg.chunk_size);
+      ]
   in
   let extra =
     if cfg.profile = "" then Some []
@@ -659,26 +643,9 @@ let build_pipeline cfg profile =
               err_line (Printf.sprintf "Save(%s): %s" profile (status_detail exn));
               (try Itb3.close pipe with Itb3.ITB_error _ -> ());
               None
-          | blob when cfg.blob_mode <> 2 ->
-              log_pipeline_initialised profile blob;
-              Some (pipe, blob)
           | blob ->
-              (* The sizing mode is not an Opts knob: the Init blob is
-                 edited and the pipeline reopened from it, so the
-                 retained blob (the one blob-cycle reopens from)
-                 carries the edited mode. *)
-              (try Itb3.close pipe with Itb3.ITB_error _ -> ());
-              if not (edit_inner_blob_mode blob 2) then (
-                err_line "rewrite blob mode: inner blob mode field not found";
-                None)
-              else (
-                match Itb3.load blob with
-                | exception exn ->
-                    err_line (Printf.sprintf "reload Mode 2 blob: %s" (status_detail exn));
-                    None
-                | reloaded ->
-                    log_pipeline_initialised profile blob;
-                    Some (reloaded, blob))))
+              log_pipeline_initialised profile blob;
+              Some (pipe, blob)))
 
 (* ---------------------------------------------------------------- *)
 (* Run                                                              *)
