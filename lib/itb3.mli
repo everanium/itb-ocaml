@@ -54,6 +54,16 @@ type stream_decryptor = dec stream
     [ITB_error] with the UNKNOWN_PROFILE status (13). *)
 val create : string -> ?opts:(string * string) list -> unit -> pipeline
 
+(** Deterministically constructs a Pipeline from eight caller-supplied
+    master keys (one per canonical seed slot 0..7) against the named
+    profile and options. The eight master keys must come from
+    independent entropy or key-agreement sources; never derive all
+    eight keys from a single secret or a single KDF parent key. *)
+val create_keys : string -> ?opts:(string * string) list -> bytes list -> unit -> pipeline
+
+(** Alias for {!create_keys}. *)
+val init_keys : string -> ?opts:(string * string) list -> bytes list -> unit -> pipeline
+
 (** [load ?perm ?wrap blob] reconstructs a pipeline from a blob
     produced by [save] or [rekey]. Omit both masters to use the
     blob-embedded pair; supply both to override them (the pair is

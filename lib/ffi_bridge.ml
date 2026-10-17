@@ -87,6 +87,10 @@ type syms = {
   triple_init :
     string -> string -> Bytes.t ocaml -> Unsigned.size_t -> Unsigned.size_t ptr ->
     Unsigned.size_t ptr -> int;
+  triple_init_keys :
+    string -> string -> Bytes.t ocaml -> Unsigned.size_t -> Unsigned.size_t ptr ->
+    Unsigned.size_t -> Bytes.t ocaml -> Unsigned.size_t -> Unsigned.size_t ptr ->
+    Unsigned.size_t ptr -> int;
   triple_load :
     Bytes.t ocaml -> Unsigned.size_t -> Bytes.t ocaml -> Unsigned.size_t ->
     Bytes.t ocaml -> Unsigned.size_t -> Unsigned.size_t -> Unsigned.size_t ptr -> int;
@@ -141,6 +145,10 @@ let load () =
       f "ITB_Triple_Init"
         (string @-> string @-> ocaml_bytes @-> size_t @-> ptr size_t @-> ptr size_t
         @-> returning int);
+    triple_init_keys =
+      f "ITB_Triple_InitKeys"
+        (string @-> string @-> ocaml_bytes @-> size_t @-> ptr size_t @-> size_t
+        @-> ocaml_bytes @-> size_t @-> ptr size_t @-> ptr size_t @-> returning int);
     triple_load =
       f "ITB_Triple_Load"
         (ocaml_bytes @-> size_t @-> ocaml_bytes @-> size_t @-> ocaml_bytes @-> size_t

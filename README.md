@@ -12,7 +12,7 @@ to compile, no compile-time link; the `.so` / `.dylib` is resolved at
 load time with `dlopen`. Every hash-name / MAC-name / cipher-name /
 profile-name is an opaque string passed through to Go for validation;
 the binding carries no ITB construction logic. The public surface is
-the `Itb` module: `create` / `load` / `load_f` / `save` / `save_f`,
+the `Itb` module: `create` / `create_keys` / `load` / `load_f` / `save` / `save_f`,
 Single Message `encrypt_message` / `decrypt_message`, `rekey` /
 `max_workers` / `close`, one-shot `encrypt_stream_one_shot` /
 `decrypt_stream_one_shot`, incremental stream sessions
@@ -90,6 +90,8 @@ let opts = [("mode", "2"); ("chunkSize", "65536"); ("withWrapper", "false"); ("m
 let sender = Itb.create "singlemsg-triple-mac-v1" ~opts () in
 let receiver = Itb.load (Itb.save sender)
 ```
+
+`Itb.create_keys` constructs a `Pipeline` deterministically from eight caller-supplied master keys (one per seed slot `0..7`) via per-slot KDF, so two peers holding the same eight master keys derive identical `Pipeline` instances without exchanging a session blob. The eight master keys must come from independent entropy or key-agreement sources — never derive all eight keys from a single secret or a single KDF parent key.
 
 `Itb.rekey` rotates the parallax + wrapper masters mid-session (the
 eight ITB seeds and MAC key are fixed for the session lifetime by

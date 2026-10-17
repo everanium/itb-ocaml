@@ -15,9 +15,14 @@ type 'a stream = 'a Stream.t
 type stream_encryptor = enc stream
 type stream_decryptor = dec stream
 
-let binding_version = "0.7.2"
+let binding_version = "0.7.3"
 
 let create profile ?(opts = []) () = Pipeline.init profile (Pipeline.render_opts opts)
+
+let create_keys profile ?(opts = []) masters () =
+  Pipeline.init_keys profile (Pipeline.render_opts opts) masters
+
+let init_keys = create_keys
 
 let load ?(perm = Bytes.create 0) ?(wrap = Bytes.create 0) blob =
   Pipeline.load blob perm wrap

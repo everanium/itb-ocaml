@@ -235,6 +235,31 @@ let test_save_load_round_trip () =
   Itb3.close receiver;
   Itb3.close sender
 
+let test_create_keys_deterministic_and_errors () =
+  let masters =
+    List.init 8 (fun i -> Bytes.make 32 (Char.chr (0x11 * (i + 1))))
+  in
+  let p1 = Itb3.create_keys "singlemsg-triple-mac-v1" masters () in
+  let p2 = Itb3.init_keys "singlemsg-triple-mac-v1" masters () in
+  Alcotest.(check bool) "blobs equal" true
+    (Bytes.equal (Itb3.save p1) (Itb3.save p2));
+  let plain = Bytes.of_string "deterministic create_keys" in
+  let wire = Itb3.encrypt_message p1 plain in
+  Alcotest.(check bool) "create_keys round trip" true
+    (Bytes.equal plain (Itb3.decrypt_message p2 wire));
+  Itb3.close p1;
+  Itb3.close p2;
+  let dup_masters =
+    List.mapi (fun i m -> if i = 1 then List.hd masters else m) masters
+  in
+  check_status 4 (fun () ->
+      Itb3.create_keys "singlemsg-triple-mac-v1" dup_masters ());
+  let short_masters =
+    List.mapi (fun i m -> if i = 0 then Bytes.make 8 '\x11' else m) masters
+  in
+  check_status 4 (fun () ->
+      Itb3.create_keys "singlemsg-triple-mac-v1" short_masters ())
+
 let test_inspect_carries_recipe_and_inspection_fields () =
   (* inspect carries the registry recipe plus the blob-only
      nonce_bits / barrier_fill inspection fields; lookup returns just
@@ -603,6 +628,8 @@ let () =
       ( "persist",
         [
           case "save / load round trip" (fun () -> test_save_load_round_trip ());
+          case "create_keys determinism and errors" (fun () ->
+              test_create_keys_deterministic_and_errors ());
           case "inspect carries recipe + inspection fields"
             (fun () -> test_inspect_carries_recipe_and_inspection_fields ());
           case "save_f / load_f round trip" (fun () -> test_save_f_load_f_round_trip ());

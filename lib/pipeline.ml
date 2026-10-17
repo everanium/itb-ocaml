@@ -71,6 +71,37 @@ let init profile opts =
          s.triple_init profile opts (bs buf) (sz cap) need handle));
   attach !@handle
 
+(* Deterministically constructs a Pipeline from eight caller-supplied
+   master keys (one per canonical seed slot 0..7) against the named
+   profile and options. The eight master keys must come from
+   independent entropy or key-agreement sources; never derive all eight
+   keys from a single secret or a single KDF parent key. *)
+let init_keys profile opts masters =
+  let s = syms () in
+  let count = List.length masters in
+  let total_len = List.fold_left (fun acc m -> acc + Bytes.length m) 0 masters in
+  let flat = Bytes.create (max total_len 1) in
+  let lens = CArray.make size_t (max count 1) in
+  let off = ref 0 in
+  List.iteri
+    (fun i m ->
+      let n = Bytes.length m in
+      CArray.set lens i (sz n);
+      if n > 0 then begin
+        Bytes.blit m 0 flat !off n;
+        off := !off + n
+      end)
+    masters;
+  let handle = new_handle_out () in
+  Fun.protect
+    ~finally:(fun () -> Bytes.fill flat 0 (Bytes.length flat) '\x00')
+    (fun () ->
+      ignore
+        (retry_once blob_cap (fun buf cap need ->
+             s.triple_init_keys profile opts (bs flat) (sz total_len)
+               (CArray.start lens) (sz count) (bs buf) (sz cap) need handle)));
+  attach !@handle
+
 (* The masters pair crosses as (perm, wrap, count): both absent
    yields 0, otherwise 2 -- libitb3 validates the pair. *)
 let masters_count perm wrap =
