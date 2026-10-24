@@ -58,6 +58,28 @@ let render_opts pairs =
 (* Constructors                                                     *)
 (* ---------------------------------------------------------------- *)
 
+(* Cold-path retry-once helper for session blobs: zeroes the staging
+   buffer(s) before returning. *)
+let retry_once_secret cap (call : Bytes.t -> int -> Unsigned.size_t ptr -> int) =
+  let need = new_size_out () in
+  let buf = Bytes.create cap in
+  Fun.protect
+    ~finally:(fun () -> Bytes.fill buf 0 (Bytes.length buf) '\x00')
+    (fun () ->
+      let rc = call buf cap need in
+      let n = sz_int !@need in
+      if rc = status_buffer_too_small && n > cap then
+        let buf2 = Bytes.create n in
+        Fun.protect
+          ~finally:(fun () -> Bytes.fill buf2 0 (Bytes.length buf2) '\x00')
+          (fun () ->
+            let rc2 = call buf2 n need in
+            check rc2;
+            Bytes.sub buf2 0 (sz_int !@need))
+      else (
+        check rc;
+        Bytes.sub buf 0 n))
+
 (* Constructs a fresh Pipeline against the named profile. On a
    blob-buffer retry the Init re-runs and yields a fresh session (the
    undersized attempt is closed by libitb3 before returning). The Init
@@ -66,9 +88,11 @@ let render_opts pairs =
 let init profile opts =
   let s = syms () in
   let handle = new_handle_out () in
-  ignore
-    (retry_once blob_cap (fun buf cap need ->
-         s.triple_init profile opts (bs buf) (sz cap) need handle));
+  let blob =
+    retry_once_secret blob_cap (fun buf cap need ->
+        s.triple_init profile opts (bs buf) (sz cap) need handle)
+  in
+  Bytes.fill blob 0 (Bytes.length blob) '\x00';
   attach !@handle
 
 (* Deterministically constructs a Pipeline from eight caller-supplied
@@ -96,10 +120,12 @@ let init_keys profile opts masters =
   Fun.protect
     ~finally:(fun () -> Bytes.fill flat 0 (Bytes.length flat) '\x00')
     (fun () ->
-      ignore
-        (retry_once blob_cap (fun buf cap need ->
-             s.triple_init_keys profile opts (bs flat) (sz total_len)
-               (CArray.start lens) (sz count) (bs buf) (sz cap) need handle)));
+      let blob =
+        retry_once_secret blob_cap (fun buf cap need ->
+            s.triple_init_keys profile opts (bs flat) (sz total_len)
+              (CArray.start lens) (sz count) (bs buf) (sz cap) need handle)
+      in
+      Bytes.fill blob 0 (Bytes.length blob) '\x00');
   attach !@handle
 
 (* The masters pair crosses as (perm, wrap, count): both absent
@@ -156,7 +182,7 @@ let decrypt_message p wire =
 let save p =
   require_live p;
   let s = syms () in
-  retry_once blob_cap (fun buf cap need -> s.triple_save p.handle (bs buf) (sz cap) need)
+  retry_once_secret blob_cap (fun buf cap need -> s.triple_save p.handle (bs buf) (sz cap) need)
 
 (* Writes the current blob to [path] inside libitb3 (mode 0600). *)
 let save_f p path =
@@ -175,7 +201,7 @@ let max_workers p n =
 let rekey p perm wrap =
   require_live p;
   let s = syms () in
-  retry_once blob_cap (fun buf cap need ->
+  retry_once_secret blob_cap (fun buf cap need ->
       s.triple_rekey p.handle (bs perm) (byte_len perm) (bs wrap) (byte_len wrap)
         (bs buf) (sz cap) need)
 
