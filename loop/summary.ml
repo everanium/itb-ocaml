@@ -183,6 +183,7 @@ let emit_json r elapsed_ns total_iters total_enc total_dec avg_enc avg_dec error
   add
     (Printf.sprintf ",\"drbg_auto_tier\":%s"
        (json_string (try Itb3.drbg_auto_tier () with Itb3.ITB_error _ -> "")));
+  add (Printf.sprintf ",\"interlock\":%s" (json_string cfg.interlock));
   add (Printf.sprintf ",\"chunk_size_bytes\":%d" cfg.chunk_size);
   add (Printf.sprintf ",\"barrier_fill\":%d" cfg.barrier_fill);
   add (Printf.sprintf ",\"parallax\":\"%s\"" (on_off cfg.parallax));

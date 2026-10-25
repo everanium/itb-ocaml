@@ -82,6 +82,8 @@ let flags =
     ("goroutines", "int", Kind_int, Rint 3,
      "concurrent workers (1..10); on runtimes without parallelism values above 1 are clamped to 1");
     ("hash", "string", Kind_string, Rstring "areion512", "inner ITB hash primitive name");
+    ("interlock", "string", Kind_string, Rstring "",
+     "Interlocked Barrier chunk width: 48 | 168; empty = profile default (48; 168 requires 512-bit hash)");
     ("iterations", "int", Kind_int64, Rint 0,
      "fixed per-worker iteration count; 0 = duration-based");
     ("json-output", "", Kind_bool, Rbool false,
@@ -491,6 +493,12 @@ let parse_flags argv =
              cfg.barrier_fill);
       (* Validated by Init: the C ABI enumerates no DRBG names. *)
       cfg.drbg <- raw_string table "drbg";
+      cfg.interlock <- raw_string table "interlock";
+      if not (List.mem cfg.interlock [ ""; "48"; "168" ]) then
+        reject
+          (Printf.sprintf
+             "--interlock must be 48 | 168 (or empty = profile default), got \"%s\""
+             cfg.interlock);
       (match Size.parse_size (raw_string table "chunk-size") with
       | Some n -> cfg.chunk_size <- n
       | None ->
@@ -573,14 +581,15 @@ let log_pipeline_initialised profile blob =
       log_line
         (Printf.sprintf
            "pipeline initialised: profile=%s blob=%d bytes hash=%s key-bits=%d \
-            nonce-bits=%d barrier-fill=%d chunk-size=%d mac=%s parallax=%s wrapper=%s%s%s"
+            nonce-bits=%d barrier-fill=%d chunk-size=%d mac=%s parallax=%s wrapper=%s%s%s%s"
            profile (Bytes.length blob) (record_str json "hash") (record_int json "keybits")
            (record_int json "nonce_bits") (record_int json "barrier_fill")
            (record_int json "chunk") (record_str json "mac")
            (on_off (record_bool json "parallax"))
            (on_off (record_bool json "wrapper"))
            (if record_int json "container_mode" = 2 then " container-mode=2" else "")
-           (match record_str json "drbg" with "-" -> "" | d -> " drbg=" ^ d))
+           (match record_str json "drbg" with "-" -> "" | d -> " drbg=" ^ d)
+           (match record_str json "interlock" with "-" -> "" | il -> " interlock=" ^ il))
 
 (* Sets the inner blob's "mode" field of a wrap-layer session blob to
    target_mode (1 = per-region, 2 = per-container) in place. The wrap
@@ -614,6 +623,7 @@ let build_pipeline cfg profile =
         ("nonceBits", string_of_int cfg.nonce_bits);
         ("barrierFill", string_of_int cfg.barrier_fill);
         ("drbg", cfg.drbg);
+        ("interlock", cfg.interlock);
         ("chunkSize", string_of_int cfg.chunk_size);
       ]
   in
@@ -693,7 +703,7 @@ let run argv =
       (Printf.sprintf
          "overrides: profile=\"%s\" key-bits=%d nonce-bits=%d chunk-size=%s \
           barrier-fill=%d gomaxprocs=%d rekey-every=%d blob-cycle-every=%d \
-          payload-mode=%s seed=%Lu json-output=%s%s%s"
+          payload-mode=%s seed=%Lu json-output=%s%s%s%s"
          cfg.profile cfg.key_bits cfg.nonce_bits
          (Size.human_bytes cfg.chunk_size)
          cfg.barrier_fill cfg.gomaxprocs cfg.rekey_every cfg.blob_cycle_every
@@ -701,7 +711,8 @@ let run argv =
          cfg.seed
          (if cfg.json_output then "true" else "false")
          (if cfg.blob_mode <> 1 then Printf.sprintf " blob-mode=%d" cfg.blob_mode else "")
-         (if cfg.drbg = "" then "" else " drbg=" ^ cfg.drbg));
+         (if cfg.drbg = "" then "" else " drbg=" ^ cfg.drbg)
+         (if cfg.interlock = "" then "" else " interlock=" ^ cfg.interlock));
     log_line
       (Printf.sprintf "policy: microbatch-tiers=%s hashpool-starters=%s"
          (policy_label "ITB_MICROBATCH_TIERS")

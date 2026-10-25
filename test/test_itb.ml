@@ -593,6 +593,44 @@ let test_drbg_register_copy () =
     (contains (Itb3.lookup "ocaml-binding-test-drbg-copy") "\"drbg\":\"csprng\"");
   Itb3.close sender
 
+let test_interlock_round_trip_and_errors () =
+  let sender = Itb3.create "singlemsg-triple-mac-v1" ~opts:[ ("interlock", "168") ] () in
+  let blob = Itb3.save sender in
+  let inspected = Itb3.inspect blob in
+  Alcotest.(check bool) "inspect carries interlock" true
+    (contains inspected "\"interlock\":\"168\"");
+  let receiver = Itb3.load blob in
+  let plain = Bytes.of_string "interlock 168" in
+  Alcotest.(check bool) "interlock round trip" true
+    (Bytes.equal plain
+       (Itb3.decrypt_message receiver (Itb3.encrypt_message sender plain)));
+  let back = Bytes.of_string "reverse interlock 168" in
+  Alcotest.(check bool) "interlock reverse round trip" true
+    (Bytes.equal back
+       (Itb3.decrypt_message sender (Itb3.encrypt_message receiver back)));
+  Itb3.close receiver;
+  Itb3.close sender;
+  let def_pipe = Itb3.create "singlemsg-triple-mac-v1" () in
+  Alcotest.(check bool) "default inspect omits interlock" false
+    (contains (Itb3.inspect (Itb3.save def_pipe)) "\"interlock\":");
+  Itb3.close def_pipe;
+  Alcotest.(check bool) "lookup omits interlock" false
+    (contains (Itb3.lookup "singlemsg-triple-mac-v1") "\"interlock\":");
+  let record =
+    List.fold_left drop_scalar_key inspected
+      [ "name"; "nonce_bits"; "barrier_fill"; "container_mode" ]
+  in
+  Itb3.register ~name:"ocaml-binding-test-interlock-copy" ~profile:record;
+  Alcotest.(check bool) "register copy keeps interlock" true
+    (contains (Itb3.lookup "ocaml-binding-test-interlock-copy") "\"interlock\":\"168\"");
+  (* Status 4 = BAD_INPUT. *)
+  check_status 4 (fun () ->
+      Itb3.create "singlemsg-triple-mac-v1"
+        ~opts:[ ("innerHash", "blake3"); ("interlock", "168") ]
+        ());
+  check_status 4 (fun () ->
+      Itb3.create "singlemsg-triple-mac-v1" ~opts:[ ("interlock", "96") ] ())
+
 let () =
   (* Go-runtime pacing caps applied before any cipher work. *)
   Itb3.set_memory_limit (512 * 1024 * 1024);
@@ -667,5 +705,10 @@ let () =
           case "inspect, default and unknown name" (fun () ->
               test_drbg_inspect_default_and_unknown ());
           case "register copy keeps drbg" (fun () -> test_drbg_register_copy ());
+        ] );
+      ( "interlock",
+        [
+          case "round trip, inspect, register copy and errors" (fun () ->
+              test_interlock_round_trip_and_errors ());
         ] );
     ]

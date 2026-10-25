@@ -80,13 +80,15 @@ let () =
 ```
 
 The `?opts` association list overrides the profile default at
-`create` (chunk size, outer cipher, parallax on/off, wrapper on/off,
-MAC name, palette, worker cap) — rendered into the URL-query opts
-string the Go side validates. The resolved shape travels inside the
-blob, so the receiver needs no options of its own:
+`create` (container mode, interlock chunk width `"48"` | `"168"` where
+`""` selects the 48-bit default and `"168"` requires a 512-bit hash,
+chunk size, outer cipher, parallax on/off, wrapper on/off, MAC name,
+palette, worker cap) — rendered into the URL-query opts string the Go
+side validates. The resolved shape travels inside the blob, so the
+receiver needs no options of its own:
 
 ```ocaml
-let opts = [("mode", "2"); ("chunkSize", "65536"); ("withWrapper", "false"); ("maxWorkers", "4")] in
+let opts = [("mode", "2"); ("interlock", "168"); ("chunkSize", "65536"); ("withWrapper", "false"); ("maxWorkers", "4")] in
 let sender = Itb.create "singlemsg-triple-mac-v1" ~opts () in
 let receiver = Itb.load (Itb.save sender)
 ```
