@@ -68,7 +68,7 @@ let flags =
     ("blob-cycle-every", "int", Kind_int64, Rint 0,
      "reopen each pipeline from its session blob every N iterations per worker; 0 = never");
     ("blob-mode", "int", Kind_int, Rint 1,
-     "container floor sizing mode: 1 (per-region, default) | 2 (per-container)");
+     "container floor sizing mode: 1 (per-region, default) | 2 (per-container) | 3 (gauss-posit)");
     ("chunk-size", "string", Kind_string, Rstring "0",
      "streaming chunk-size budget (e.g. 4MB); 0 = profile default; inert for pure message shape");
     ("drbg", "string", Kind_string, Rstring "",
@@ -480,10 +480,10 @@ let parse_flags argv =
              "--nonce-bits must be 128 | 256 | 512 (or 0 = profile default), got %d"
              cfg.nonce_bits);
       cfg.blob_mode <- raw_int table "blob-mode";
-      if not (List.mem cfg.blob_mode [ 1; 2 ]) then
+      if not (List.mem cfg.blob_mode [ 1; 2; 3 ]) then
         reject
           (Printf.sprintf
-             "--blob-mode must be 1 (per-region) | 2 (per-container), got %d"
+             "--blob-mode must be 1 (per-region) | 2 (per-container) | 3 (gauss-posit), got %d"
              cfg.blob_mode);
       cfg.barrier_fill <- raw_int table "barrier-fill";
       if not (List.mem cfg.barrier_fill [ 0; 1; 2; 4; 8; 16; 32 ]) then
@@ -587,12 +587,13 @@ let log_pipeline_initialised profile blob =
            (record_int json "chunk") (record_str json "mac")
            (on_off (record_bool json "parallax"))
            (on_off (record_bool json "wrapper"))
-           (if record_int json "container_mode" = 2 then " container-mode=2" else "")
+           (let cm = record_int json "container_mode" in
+            if cm = 2 || cm = 3 then Printf.sprintf " container-mode=%d" cm else "")
            (match record_str json "drbg" with "-" -> "" | d -> " drbg=" ^ d)
            (match record_str json "interlock" with "-" -> "" | il -> " interlock=" ^ il))
 
 (* Sets the inner blob's "mode" field of a wrap-layer session blob to
-   target_mode (1 = per-region, 2 = per-container) in place. The wrap
+   target_mode (1 = per-region, 2 = per-container, 3 = gauss-posit) in place. The wrap
    layer's profile record carries its own "mode" (a string), so the
    search starts at the inner blob ("ib"); both shipped modes are one
    digit wide, so the blob length does not change. Returns false when

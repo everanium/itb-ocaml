@@ -55,7 +55,7 @@ type config = {
   mutable profile : string; (* empty = shape-based profile pair *)
   mutable key_bits : int; (* 0 = profile default *)
   mutable nonce_bits : int; (* 0 = profile default *)
-  mutable blob_mode : int; (* container floor sizing mode: 1 (per-region, default) | 2 (per-container) *)
+  mutable blob_mode : int; (* container floor sizing mode: 1 (per-region, default) | 2 (per-container) | 3 (gauss-posit) *)
   mutable chunk_size : int; (* 0 = profile default *)
   mutable barrier_fill : int; (* 0 = profile default *)
   mutable drbg : string; (* DRBG fill primitive; "" = profile default (auto tier) *)

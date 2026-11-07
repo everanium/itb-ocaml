@@ -290,6 +290,11 @@ let test_inspect_carries_recipe_and_inspection_fields () =
   Alcotest.(check bool) "mode 2 inspect carries container_mode 2" true
     (contains inspected2 "\"container_mode\":2");
   Itb3.close s2;
+  let s3 = Itb3.create "singlemsg-triple-mac-v1" ~opts:[ ("mode", "3") ] () in
+  let inspected3 = Itb3.inspect (Itb3.save s3) in
+  Alcotest.(check bool) "mode 3 inspect carries container_mode 3" true
+    (contains inspected3 "\"container_mode\":3");
+  Itb3.close s3;
   (* Status 4 = BAD_INPUT. *)
   check_status 4 (fun () -> Itb3.inspect (Bytes.of_string "not a blob"));
   Itb3.close sender
